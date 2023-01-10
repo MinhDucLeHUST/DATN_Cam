@@ -1,26 +1,46 @@
 #include <Arduino.h>
+#include <string>
 #include <LiquidCrystal_I2C.h>
 #include "as608_lcd.h"
+#include "keypad4x4.h"
+#include "hai.h"
 
-// #include "keypad4x4.h"
+using namespace std;
 
 #define MAX_WRONG_PASS 3
 
-int count = 0;
+int curCursorIndex = 0;
 int countWrongPass = 0;
 unsigned long loopCount;
-unsigned long time;
+unsigned long curTime;
 bool checkPass = false;
 bool checkOpenDoor = false;
-String msg;
-String Password = "123456";
-bool statusChangeFinger = false;
-String inputKeypad = "______";
+const string PASSWORD = "123456";
 
-char getKey();
+bool statusChangeFinger = false;
+string inputKeypad = "______";
+string pass = "______";
+
+bool checkKeyPress = false;
+
+
+int pin_rows1[4] = {19, 18, 5, 17};	 // GIOP19, GIOP18, GIOP5, GIOP17 connect to the row pins
+int pin_column1[4] = {16, 4, 2, 15}; // GIOP16, GIOP4, GIOP0, GIOP2 connec
+
+void IRAM_ATTR isr()
+{
+	checkKeyPress = true;
+}
+// Intterrupt
+void initKeyPad();
+void deInitKeyPad();
+
+// Intterrupt
+char getKeyInterrupt();
 void display();
-bool enterPassword(char c);
-bool checkPassword();
+
+bool handleKeyPad(char c);
+
 void warnWrongPassword();
 void openDoor();
 bool checkFinger();
@@ -36,13 +56,12 @@ void setup()
 	Serial.begin(9600);
 	lcd.init(); // initialize the lcd
 	lcd.backlight();
-	// Serial2.setPins(RX_PIN, TX_PIN);
 	fingerInit();
 	loopCount = 0;
-	time = millis();
-	msg = "";
-	statusChangeFinger = true;
-	// display();
+	curTime = millis();
+	statusChangeFinger = false;
+	initKeyPad();
+	display();
 }
 
 void loop()
@@ -56,69 +75,82 @@ void loop()
 	// {
 	// 	warnWrongPassword();
 	// }
+	if (checkKeyPress == true)
+	{
+		curTime = millis();
+		deInitKeyPad();
+		char c = '!';
+		do
+		{
+			c = '!';
+			while (c == '!' && millis() - curTime < 5000)
+			{
+				c = getKey();
+				delay(10);
+			}
+			curTime = millis();
+		} while (handleKeyPad(c) == true);
+		initKeyPad();
+		checkKeyPress = false;
+	}
 
+	//
 	if (statusChangeFinger == true)
 	{
 		while (statusChangeFinger == true)
 		{
-			changeFinger(); /* code */
+			changeFinger(statusChangeFinger); /* code */
 		}
 	}
-	// if (checkFinger() == true)
-	// {
-	// 	openDoor();
-	// }
 
-	delay(100);
+	checkFinger();
+
+	delay(10);
 }
 void display()
 {
-	// Serial.print("Enter Password: ");
 	lcd.clear();
 	lcd.setCursor(1, 0);
 	lcd.print("Enter Password");
 	lcd.setCursor(5, 1);
-	lcd.print(inputKeypad);
-	// lcd.print("______");
-}
-bool checkPassword()
-{
-	char c = getKey();
-	if (c != '!')
+	for (char i : inputKeypad)
 	{
-		enterPassword(c);
+		lcd.print(i);
 	}
-	if (checkPass == true)
-	{
-		return true;
-	}
-
-	return false;
 }
 
-bool enterPassword(char c)
+bool handleKeyPad(char c)
 {
-	if (count <= 6)
+	if (curCursorIndex <= 6)
 	{
 		switch (c)
 		{
 		case '*': // Clear
-			count--;
-
+			curCursorIndex--;
 			// lcd.setCursor(5 + count, 1);
 			// lcd.print("_");
-			inputKeypad[count] = '-';
+			pass[curCursorIndex] = '_';
+			inputKeypad[curCursorIndex] = '_';
+			display();
 			break;
 		case '#': // Enter
-			if (count == 6)
+			if (curCursorIndex == 6)
 			{
-				// Serial.println(pass);
-				if (Password.indexOf(inputKeypad) != -1)
+				// Serial.println("Haidz");
+				// // Serial.println(pass[5]);
+				// Serial.print(pass.substr);
+
+				if (pass == PASSWORD)
 				{
 					lcd.clear();
 					lcd.setCursor(5, 0);
 					lcd.print("CORRECT!");
+					Serial.println("CORRECT");
+					delay(2000);
+					pass = "______";
+					inputKeypad = "______";
 					checkPass = true;
+					curCursorIndex = 0;
 					countWrongPass = 0;
 					return true;
 				}
@@ -127,9 +159,12 @@ bool enterPassword(char c)
 					lcd.clear();
 					lcd.setCursor(5, 0);
 					lcd.print("WRONG!!!");
-					delay(1000);
+					Serial.println("WRONG!!!");
+					pass = "______";
+					inputKeypad = "______";
+					delay(2000);
 					countWrongPass++;
-					count = 0;
+					curCursorIndex = 0;
 					display();
 					return false;
 				}
@@ -144,6 +179,8 @@ bool enterPassword(char c)
 			{
 				statusChangeFinger = false;
 			}
+			pass = "______";
+			inputKeypad = "______";
 			break;
 		case 'B':
 			break;
@@ -151,30 +188,34 @@ bool enterPassword(char c)
 			break;
 		case 'D':
 			break;
+		case '!':
+			pass = "______";
+			inputKeypad = "______";
+			display();
+			return false;
 		default:
-			if (count < 6)
+			Serial.print(c);
+			if (curCursorIndex < 6)
 			{
-				inputKeypad[count] = c;
-				lcd.setCursor(5 + count, 1);
-				lcd.print(c);
-				delay(500);
-				lcd.setCursor(5 + count, 1);
-				lcd.print("*");
-				// lcd.blink();
-				count++;
+				pass[curCursorIndex] = c;
+				inputKeypad[curCursorIndex] = c;
+				display();
+				delay(200);
+				inputKeypad[curCursorIndex] = '*';
+				display();
+				curCursorIndex++;
 			}
 			break;
 		}
 	}
-	return false;
+	return true;
 }
 
 void openDoor()
 {
 	// opendoor
-
 	checkOpenDoor = false;
-	count = 0;
+	curCursorIndex = 0;
 	checkPass = false;
 	display();
 }
@@ -207,4 +248,42 @@ bool checkFinger()
 		}
 	}
 	return true;
+}
+
+void initKeyPad()
+{
+	for (int i = 0; i < 4; i++)
+	{
+		pinMode(pin_column1[i], OUTPUT);
+		digitalWrite(pin_column1[i], LOW);
+	}
+	for (int i = 0; i < 4; i++)
+	{
+		pinMode(pin_rows1[i], INPUT_PULLUP);
+		attachInterrupt(pin_rows1[i], isr, FALLING);
+	}
+}
+
+void deInitKeyPad()
+{
+	for (int i = 0; i < 4; i++)
+	{
+		pinMode(pin_rows1[i], INPUT_PULLUP);
+		detachInterrupt(pin_rows1[i]);
+	}
+}
+char getKeyInterrupt()
+{
+	unsigned int timeOut = 5000;
+	unsigned long newTime = millis();
+	deInitKeyPad();
+	char c = getKey();
+	while (c == '!' && (millis() - newTime) < timeOut)
+	{
+		c = getKey();
+		delay(10);
+	}
+	initKeyPad();
+	delay(100);
+	return c;
 }

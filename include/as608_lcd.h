@@ -6,7 +6,7 @@
 
 
 void fingerInit();
-void changeFinger();
+void changeFinger(bool &statusFinger,int timeOut = 10000);
 uint8_t getFingerprintEnroll();
 int getFingerprintIDez();
 

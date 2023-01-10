@@ -41,7 +41,7 @@ void fingerInit()
 	delay(5000);
 }
 
-void changeFinger()
+void changeFinger(bool &statusFinger,int timeOut)
 {
 	Serial.println("Ready to enroll a fingerprint!");
 	lcdDisplay.clear();
@@ -49,9 +49,10 @@ void changeFinger()
 	lcdDisplay.print("Please type ID(1-3)");
 	lcdDisplay.setCursor(5, 1);
 	Serial.println("Please type in the ID # (from 1 to 127) you want to save this finger as...");
-	id = readnumber();
+	//id = readnumber();
 	// id = 1;
-	//  Serial.println(id);
+	id = 1;
+	Serial.println(id);
 	lcdDisplay.print(id);
 	if (id == 0)
 	{ // ID #0 not allowed, try again!
@@ -66,7 +67,10 @@ void changeFinger()
 	lcdDisplay.print(id);
 	Serial.println(id);
 	while (getFingerprintEnroll() != FINGERPRINT_OK)
-		;
+	{
+		delay(1000);
+	}
+	statusFinger = false;
 }
 
 uint8_t getFingerprintEnroll()
