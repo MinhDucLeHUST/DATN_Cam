@@ -3,33 +3,31 @@
 #include <LiquidCrystal_I2C.h>
 #include "as608_lcd.h"
 #include "keypad4x4.h"
-#include "hai.h"
+#include "./DeviceStatus/DeviceStatus.h"
 
 using namespace std;
 
 #define MAX_WRONG_PASS 3
 
+DeviceStatus deviceStatus;
+
 int curCursorIndex = 0;
 int countWrongPass = 0;
+
 unsigned long loopCount;
 unsigned long curTime;
-bool checkPass = false;
-bool checkOpenDoor = false;
-const string PASSWORD = "123456";
 
-bool statusChangeFinger = false;
+
+const string PASSWORD = "123456";
 string inputKeypad = "______";
 string pass = "______";
-
-bool checkKeyPress = false;
-
 
 int pin_rows1[4] = {19, 18, 5, 17};	 // GIOP19, GIOP18, GIOP5, GIOP17 connect to the row pins
 int pin_column1[4] = {16, 4, 2, 15}; // GIOP16, GIOP4, GIOP0, GIOP2 connec
 
 void IRAM_ATTR isr()
 {
-	checkKeyPress = true;
+	deviceStatus.keyPress = true;
 }
 // Intterrupt
 void initKeyPad();
@@ -59,7 +57,7 @@ void setup()
 	fingerInit();
 	loopCount = 0;
 	curTime = millis();
-	statusChangeFinger = false;
+	deviceStatus.statusChangeFinger = false;
 	initKeyPad();
 	display();
 }
@@ -75,7 +73,7 @@ void loop()
 	// {
 	// 	warnWrongPassword();
 	// }
-	if (checkKeyPress == true)
+	if (deviceStatus.keyPress == true)
 	{
 		curTime = millis();
 		deInitKeyPad();
@@ -91,15 +89,15 @@ void loop()
 			curTime = millis();
 		} while (handleKeyPad(c) == true);
 		initKeyPad();
-		checkKeyPress = false;
+		deviceStatus.keyPress = false;
 	}
 
 	//
-	if (statusChangeFinger == true)
+	if (deviceStatus.statusChangeFinger == true)
 	{
-		while (statusChangeFinger == true)
+		while (deviceStatus.statusChangeFinger == true)
 		{
-			changeFinger(statusChangeFinger); /* code */
+			changeFinger(deviceStatus.statusChangeFinger); /* code */
 		}
 	}
 
@@ -149,7 +147,7 @@ bool handleKeyPad(char c)
 					delay(2000);
 					pass = "______";
 					inputKeypad = "______";
-					checkPass = true;
+					//checkPass = true;
 					curCursorIndex = 0;
 					countWrongPass = 0;
 					return true;
@@ -171,13 +169,13 @@ bool handleKeyPad(char c)
 			}
 			break;
 		case 'A':
-			if (statusChangeFinger == false)
+			if (deviceStatus.statusChangeFinger == false)
 			{
-				statusChangeFinger = true;
+				deviceStatus.statusChangeFinger = true;
 			}
 			else
 			{
-				statusChangeFinger = false;
+				deviceStatus.statusChangeFinger = false;
 			}
 			pass = "______";
 			inputKeypad = "______";
@@ -214,9 +212,9 @@ bool handleKeyPad(char c)
 void openDoor()
 {
 	// opendoor
-	checkOpenDoor = false;
+	deviceStatus.openDoor = false;
 	curCursorIndex = 0;
-	checkPass = false;
+	//checkPass = false;
 	display();
 }
 void warnWrongPassword()
