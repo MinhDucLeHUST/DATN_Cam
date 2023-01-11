@@ -1,13 +1,15 @@
 #include <Arduino.h>
 #include <string>
 #include <LiquidCrystal_I2C.h>
-#include "as608_lcd.h"
-#include "keypad4x4.h"
+#include "./AS608_LCD/AS608_LCD.h"
+#include "./Keypad4_4/Keypad4_4.h"
 #include "./DeviceStatus/DeviceStatus.h"
 
 using namespace std;
 
+#define debug
 #define MAX_WRONG_PASS 3
+#define MAX_FINGER_ID 5
 
 DeviceStatus deviceStatus;
 
@@ -17,7 +19,6 @@ int countWrongPass = 0;
 unsigned long loopCount;
 unsigned long curTime;
 
-
 const string PASSWORD = "123456";
 string inputKeypad = "______";
 string pass = "______";
@@ -25,6 +26,9 @@ string pass = "______";
 int pin_rows1[4] = {19, 18, 5, 17};	 // GIOP19, GIOP18, GIOP5, GIOP17 connect to the row pins
 int pin_column1[4] = {16, 4, 2, 15}; // GIOP16, GIOP4, GIOP0, GIOP2 connec
 
+int fingerId[MAX_FINGER_ID][2] = {{1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0}};
+
+int fingerIdOpendoor = 0;
 void IRAM_ATTR isr()
 {
 	deviceStatus.keyPress = true;
@@ -35,19 +39,20 @@ void deInitKeyPad();
 
 // Intterrupt
 char getKeyInterrupt();
-void display();
+void lcdDisplayEnterPass();
+void lcdDisplayOpenDoor();
 
+void handleKeyPress();
 bool handleKeyPad(char c);
+bool handleFinger();
 
 void warnWrongPassword();
 void openDoor();
-bool checkFinger();
+int checkFinger();
 
-void task1();
-void task2();
-void task3();
-void task4();
-void task5();
+bool receiverFromGetway();
+void handleDataReceiver();
+
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 void setup()
 {
@@ -57,55 +62,49 @@ void setup()
 	fingerInit();
 	loopCount = 0;
 	curTime = millis();
-	deviceStatus.statusChangeFinger = false;
+	// deviceStatus.statusChangeFinger = false;
 	initKeyPad();
-	display();
+	lcdDisplayEnterPass();
 }
 
 void loop()
 {
-	// if (checkPassword() == true)
-	// {
-	// 	openDoor();
-	// }
 
-	// if (countWrongPass >= MAX_WRONG_PASS)
-	// {
-	// 	warnWrongPassword();
-	// }
 	if (deviceStatus.keyPress == true)
 	{
-		curTime = millis();
-		deInitKeyPad();
-		char c = '!';
-		do
-		{
-			c = '!';
-			while (c == '!' && millis() - curTime < 5000)
-			{
-				c = getKey();
-				delay(10);
-			}
-			curTime = millis();
-		} while (handleKeyPad(c) == true);
-		initKeyPad();
-		deviceStatus.keyPress = false;
+		handleKeyPress();
 	}
 
-	//
+	if (checkFinger() != false)
+	{
+		 handleFinger();
+	}
+
+	if(deviceStatus.openDoor)
+	{
+		openDoor();
+	}
+
 	if (deviceStatus.statusChangeFinger == true)
 	{
-		while (deviceStatus.statusChangeFinger == true)
+		curTime = millis();
+		while (deviceStatus.statusChangeFinger == true && millis() - curTime < 10000)
 		{
-			changeFinger(deviceStatus.statusChangeFinger); /* code */
+			deviceStatus.statusChangeFinger = changeFinger(deviceStatus.statusChangeFinger); /* code */
 		}
+		curTime = millis();
+		deviceStatus.statusChangeFinger = false;
+		//lcdDisplayEnterPass();
 	}
 
-	checkFinger();
+	if (receiverFromGetway)
+	{
+		handleDataReceiver();
+	}
 
 	delay(10);
 }
-void display()
+void lcdDisplayEnterPass()
 {
 	lcd.clear();
 	lcd.setCursor(1, 0);
@@ -117,26 +116,47 @@ void display()
 	}
 }
 
+void lcdDisplayOpenDoor()
+{
+	lcd.clear();
+	lcd.setCursor(0, 5);
+	lcd.print("OPEN!!!");
+}
+
+void handleKeyPress()
+{
+	curTime = millis();
+	deInitKeyPad();
+	char c = '!';
+	do
+	{
+		c = '!';
+		while (c == '!' && millis() - curTime < 5000)
+		{
+			c = getKey();
+			delay(10);
+		}
+		curTime = millis();
+	} while (handleKeyPad(c) == true);
+	initKeyPad();
+	deviceStatus.keyPress = false;
+}
+
 bool handleKeyPad(char c)
 {
 	if (curCursorIndex <= 6)
 	{
 		switch (c)
 		{
-		case '*': // Clear
+		case '*':
 			curCursorIndex--;
-			// lcd.setCursor(5 + count, 1);
-			// lcd.print("_");
 			pass[curCursorIndex] = '_';
 			inputKeypad[curCursorIndex] = '_';
-			display();
+			lcdDisplayEnterPass();
 			break;
 		case '#': // Enter
 			if (curCursorIndex == 6)
 			{
-				// Serial.println("Haidz");
-				// // Serial.println(pass[5]);
-				// Serial.print(pass.substr);
 
 				if (pass == PASSWORD)
 				{
@@ -144,10 +164,12 @@ bool handleKeyPad(char c)
 					lcd.setCursor(5, 0);
 					lcd.print("CORRECT!");
 					Serial.println("CORRECT");
+					//
+					deviceStatus.openDoor = true;
 					delay(2000);
 					pass = "______";
 					inputKeypad = "______";
-					//checkPass = true;
+					// checkPass = true;
 					curCursorIndex = 0;
 					countWrongPass = 0;
 					return true;
@@ -163,7 +185,7 @@ bool handleKeyPad(char c)
 					delay(2000);
 					countWrongPass++;
 					curCursorIndex = 0;
-					display();
+					lcdDisplayEnterPass();
 					return false;
 				}
 			}
@@ -179,6 +201,7 @@ bool handleKeyPad(char c)
 			}
 			pass = "______";
 			inputKeypad = "______";
+			return false;
 			break;
 		case 'B':
 			break;
@@ -189,7 +212,7 @@ bool handleKeyPad(char c)
 		case '!':
 			pass = "______";
 			inputKeypad = "______";
-			display();
+			lcdDisplayEnterPass();
 			return false;
 		default:
 			Serial.print(c);
@@ -197,10 +220,10 @@ bool handleKeyPad(char c)
 			{
 				pass[curCursorIndex] = c;
 				inputKeypad[curCursorIndex] = c;
-				display();
+				lcdDisplayEnterPass();
 				delay(200);
 				inputKeypad[curCursorIndex] = '*';
-				display();
+				lcdDisplayEnterPass();
 				curCursorIndex++;
 			}
 			break;
@@ -211,11 +234,14 @@ bool handleKeyPad(char c)
 
 void openDoor()
 {
-	// opendoor
+	Serial.println("OpenDoorrrr");
+	lcdDisplayOpenDoor();
+	delay(2000);
+	lcdDisplayEnterPass();
+
 	deviceStatus.openDoor = false;
-	curCursorIndex = 0;
-	//checkPass = false;
-	display();
+	// curCursorIndex = 0;
+	// lcdDisplayEnterPass();
 }
 void warnWrongPassword()
 {
@@ -227,25 +253,30 @@ void warnWrongPassword()
 	lcd.print("Try after 30s!");
 }
 
-bool checkFinger()
+int checkFinger()
 {
-	int finger_status = -1;
-	finger_status = getFingerprintIDez();
-	if (finger_status != -1 and finger_status != -2)
+	int fingerStatus = -1;
+	fingerStatus = getFingerprintIDez();
+	if (fingerStatus != -1 and fingerStatus != -2)
 	{
 		Serial.print("Match");
+		Serial.println(fingerIdOpendoor);
+		fingerIdOpendoor = fingerStatus;
+		return true;
 	}
 	else
 	{
-		if (finger_status == -2)
+		if (fingerStatus == -2)
 		{
 			for (int ii = 0; ii < 5; ii++)
 			{
 				Serial.print("Not Match");
 			}
+			return false;
 		}
 	}
-	return true;
+
+	return false;
 }
 
 void initKeyPad()
@@ -284,4 +315,37 @@ char getKeyInterrupt()
 	initKeyPad();
 	delay(100);
 	return c;
+}
+
+bool handleFinger()
+{
+	if (fingerIdOpendoor != 0)
+	{
+		//openDoor();
+		return true;
+		fingerIdOpendoor = 0;
+	}
+	return false;
+	
+}
+
+void sendDataToGetway()
+{
+	// deviceId = SmartLock
+	// deviceStatus.openDoor = ?
+	// deviceStatus.warning = ?
+	// deviceStatus.unlockOption
+	// fingerIdOpendoor;
+}
+bool receiverFromGetway()
+{
+	// deviceStatus.statusChangeFinger
+	// deviceStatus.chageFinger = add/sub
+	// deviceStatus.chageFingerId = number ID
+	// deviceStatus.unlockOption = MobileApp
+	return true;
+}
+
+void handleDataReceiver()
+{
 }
