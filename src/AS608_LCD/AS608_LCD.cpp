@@ -3,7 +3,7 @@
 LiquidCrystal_I2C lcdDisplay(0x27, 16, 2);
 
 Adafruit_Fingerprint finger = Adafruit_Fingerprint(&FINGER_SERIAL);
-uint8_t id;
+int id = 0;
 
 void fingerInit()
 {
@@ -32,17 +32,21 @@ bool changeFinger(bool &statusFinger, int timeOut)
 	Serial.println("Ready to enroll a fingerprint!");
 	lcdDisplay.clear();
 	lcdDisplay.setCursor(0, 0);
-	lcdDisplay.print("Please enter ID(1-5): ");
+	lcdDisplay.print("Enter ID(1-5): ");
 	lcdDisplay.setCursor(5, 1);
 	Serial.println("Please type in the ID # (from 1 to 127) you want to save this finger as...");
 	uint8_t c = getKey();
 	unsigned long countTimeOut = millis();
-	while (c == '!' && millis() - countTimeOut < 5000)
+	while (millis() - countTimeOut < 10000)
 	{
 		c = getKey();
 		delay(10);
+		id = c - '0';
+		if(id >= 1 || id <= 5)
+		{
+			break;
+		}
 	}
-	id = c - '0';
 	if (id == -1)
 	{
 		return false;
@@ -64,7 +68,7 @@ bool changeFinger(bool &statusFinger, int timeOut)
 		{
 			lcdDisplay.clear();
 			lcdDisplay.setCursor(0, 0);
-			lcdDisplay.print("ADD FINGER ERORR!");
+			lcdDisplay.print("ADD FINGER ERO0R!");
 			lcdDisplay.setCursor(0, 1);
 			lcdDisplay.print("Retry after 3s");
 			delay(3000);
@@ -139,7 +143,9 @@ uint8_t getFingerprintEnroll()
 
 	lcdDisplay.clear();
 	lcdDisplay.setCursor(0, 0);
-	lcdDisplay.print("Enter finger again");
+	lcdDisplay.print("Enter finger ");
+		lcdDisplay.setCursor(0, 1);
+		lcdDisplay.print("again");
 
 	// Lay lai van tay lan 2
 	timeOut = millis();

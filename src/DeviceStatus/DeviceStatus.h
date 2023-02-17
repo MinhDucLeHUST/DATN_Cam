@@ -9,6 +9,14 @@ enum UnlockOption
     Finger = 3,
     MobileApp = 4,
 };
+
+enum Mode
+{
+    NORMAL = 0,
+    CHANGE_FINGER = 1,
+    CHANGE_PASSWORD = 2
+};
+
 class DeviceStatus
 {
 private:
@@ -19,7 +27,8 @@ public:
     bool checkPassWord;
     bool openDoor;
     bool warning;
-    UnlockOption unlockOption = NONE;
+    Mode mode;
+    UnlockOption unlockOption;
 };
 
 #endif
