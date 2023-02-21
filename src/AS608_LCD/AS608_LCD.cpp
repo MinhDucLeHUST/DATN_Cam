@@ -35,14 +35,16 @@ bool changeFinger(bool &statusFinger, int timeOut)
 	lcdDisplay.print("Enter ID(1-5): ");
 	lcdDisplay.setCursor(5, 1);
 	Serial.println("Please type in the ID # (from 1 to 127) you want to save this finger as...");
-	uint8_t c = getKey();
-	unsigned long countTimeOut = millis();
-	while (millis() - countTimeOut < 10000)
+	char c = getKey();
+	uint32_t countTimeOut = millis();
+	while (millis() - countTimeOut < 15000)
 	{
 		c = getKey();
 		delay(10);
+		Serial.print(c);
 		id = c - '0';
-		if(id >= 1 || id <= 5)
+		Serial.print(id);
+		if (id >= 1 && id <= 5)
 		{
 			break;
 		}
@@ -64,7 +66,8 @@ bool changeFinger(bool &statusFinger, int timeOut)
 		lcdDisplay.print("Enrolling ID:");
 		lcdDisplay.print(id);
 		Serial.println(id);
-		while (getFingerprintEnroll() != FINGERPRINT_OK)
+		countTimeOut = millis();
+		while (getFingerprintEnroll() != FINGERPRINT_OK && millis() - countTimeOut < 30000)
 		{
 			lcdDisplay.clear();
 			lcdDisplay.setCursor(0, 0);
@@ -144,8 +147,8 @@ uint8_t getFingerprintEnroll()
 	lcdDisplay.clear();
 	lcdDisplay.setCursor(0, 0);
 	lcdDisplay.print("Enter finger ");
-		lcdDisplay.setCursor(0, 1);
-		lcdDisplay.print("again");
+	lcdDisplay.setCursor(0, 1);
+	lcdDisplay.print("again");
 
 	// Lay lai van tay lan 2
 	timeOut = millis();
@@ -163,27 +166,10 @@ uint8_t getFingerprintEnroll()
 			continue;
 		}
 
-		if (millis() - timeOut > 30000)
+		if (millis() - timeOut > 10000)
 		{
 			return p;
 		}
-		// switch (p)
-		// {
-		// case FINGERPRINT_OK:
-		// 	Serial.println("Image taken");
-		// 	break;
-		// case FINGERPRINT_NOFINGER:
-		// 	break;
-		// case FINGERPRINT_PACKETRECIEVEERR:
-		// 	Serial.println("Communication error");
-		// 	break;
-		// case FINGERPRINT_IMAGEFAIL:
-		// 	Serial.println("Imaging error");
-		// 	break;
-		// default:
-		// 	Serial.println("Unknown error");
-		// 	break;
-		// }
 	}
 
 	// OK success!
@@ -229,7 +215,6 @@ uint8_t getFingerprintEnroll()
 		lcdDisplay.clear();
 		lcdDisplay.setCursor(0, 0);
 		lcdDisplay.print("Stored!");
-
 		p = finger.getImage();
 		while (p != FINGERPRINT_NOFINGER)
 		{

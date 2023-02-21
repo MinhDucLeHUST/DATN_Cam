@@ -1,3 +1,4 @@
+// Code này đã fix xong camera. mai develop nốt phần "Firebase"
 #include <Arduino.h>
 #include <string>
 #include <LiquidCrystal_I2C.h>
@@ -7,20 +8,31 @@
 #include "./Keypad4_4/Keypad4_4.h"
 #include "./DeviceStatus/DeviceStatus.h"
 #include <WiFi.h>
-#include <HTTPClient.h>
 #include <WebSocketsClient.h>
 
+// #include "twilio.hpp"
 using namespace std;
 
-#define debug
 #define MAX_WRONG_PASS 3
 #define MAX_WRONG_FINGER 5
 #define MAX_FINGER_ID 5
 #define INPUT_KEYPAD_DEFAULT "______"
 #define TIME_UPDATE_DATA_DEFAULT 2000
-#define BUZZER_PIN 33
+
+// const char* ssid = "P407";
+// const char* password = "17052000";
+
+// const char* ssid = "DucCoding";
+// const char* password = "20082k36";
+
+const char *ssid = "Noi binh yen";
+const char *password = "lucy666666";
 
 DeviceStatus deviceStatus;
+Servo myservo;
+
+WebSocketsClient webSocket;
+void webSocketEvent(WStype_t type, uint8_t *payload, size_t length);
 
 int curCursorIndex = 0;
 int countWrongPass = 0;
@@ -29,41 +41,113 @@ int deg = 0;
 unsigned long loopCount;
 unsigned long curTime;
 
-// string PASSWORD = "123456";
-string inputKeypad = INPUT_KEYPAD_DEFAULT;
-string pass = INPUT_KEYPAD_DEFAULT;
+// Servo
+int pos = 0; // variable to store the servo position
+void doServoOpen(void)
+{
+	for (pos = 0; pos <= 45; pos += 1)
+	{
+		myservo.write(pos); // tell servo to go to position in variable 'pos'
+		delay(15);			// waits 15ms for the servo to reach the position
+	}
+}
+void doServoClose(void)
+{
+	for (pos = 45; pos >= 0; pos -= 1)
+	{
+		myservo.write(pos); // tell servo to go to position in variable 'pos'
+		delay(15);			// waits 15ms for the servo to reach the position
+	}
+}
+
+// Twilio
+//  static const char *account_sid = "ACd850852d06b64ca20c2d1ba393445bb5";
+//  static const char *auth_token = "8299fc64a6daabd951449336426196a3";
+//  static const char *from_number = "+1 442 219 8435";
+//  static const char *to_number = "+84912372045";
+
+// static const char *account_sid = "AC1fd210b8bcb947be30dc2a79f6a63388";
+// static const char *auth_token = "52778b01c067d5a3188ca3c4f8f4cdeb";
+// static const char *from_number = "+12705156567";
+// static const char *to_number = "+84396606161";
+
+// static const char *message_warning_1 = "[WARNING] Someone near your hour, but no touch";
+// static const char *message_warning_2 = "[WARNING] Someone touch your door";
+// static const char *message_warning_3 = "[WARNING] Someone unlock your door";
+// Twilio *twilio;
+
+// 4 modules
+#define NO_MOTION 0
+#define DETECT_MOTION 1
+#define NO_TOUCH 0
+#define DETECT_TOUCH 1
+
+int BUZZER_PIN = 23;
+int VIBRATION_PIN = 26;
+int PIR_PIN = 27;
+int TRIG_HCSR04_PIN = 25;
+int ECHO_HCSR04_PIN = 33;
+
+int value_PIR = 0;
+int value_VIBRATION = 0;
+int send_MSG_NOTOUCH_SHORT = 0;
+int send_MSG_TOUCHED_LONG = 0;
+int send_MSG_TOUCHED_SHORT = 0;
+
+bool checkLoop = true;
+bool checkConfig = true;
+bool do_NOTOUCH_SHORT = true;
+bool do_TOUCHED_LONG = true;
+bool do_TOUCHED_SHORT = true;
+
+unsigned long duration;
+int distance_human;
+
+// connect esp32 with esp32-cam
+int TRANSMIT_PIN = 32;
+bool transmitSignal = false;
+int countTransmit = 0;
+bool var_sendCam = true;
+
+// anti thief mode
+String hostName = "192.1.1.1";
+const string PASSWORD = "123456";
+string inputKeypad = "______";
+string pass = "______";
 
 int pin_rows1[4] = {19, 18, 5, 17};	 // GIOP19, GIOP18, GIOP5, GIOP17 connect to the row pins
-int pin_column1[4] = {16, 4, 2, 15}; // GIOP16, GIOP4, GIOP0, GIOP2 connect
+int pin_column1[4] = {16, 4, 2, 15}; // GIOP16, GIOP4, GIOP0, GIOP2 connec
 
 int fingerId[MAX_FINGER_ID][2] = {{1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0}};
 
-static const int servoPin = 27;
-
-// String hostName = "http://192.1.1.1/data";
-String hostName = "192.1.1.1";
 struct NodeLock
 {
-	int nodeIndex = 2;
-	bool isLocked = true;
-	bool isWarning;
+	bool isOpen = true;
+	bool hasCameraRequest = false;
 	string password = "123456";
+	bool isWarning;
+	bool isAntiThief;
 	int status;
 };
 
 NodeLock nodeLock;
-Servo servo1;
+// Servo servo1;
 
-int fingerIdOpenDoor = 0;
+int fingerID_OpenDoor = 0;
+// int fingerIdOpenDoor = 0;
 bool statusBuzzer = false;
 bool statusChangePass = false;
+bool reconnect = false;
 
 void IRAM_ATTR isr()
 {
 	deviceStatus.keyPress = true;
 }
-// Intterrupt
+bool check123 = true;
 
+void initWiFi();
+
+// Intterrupt
 void initKeyPad();
 void deInitKeyPad();
 
@@ -81,57 +165,67 @@ void openDoor();
 void closeDoor();
 int checkFinger();
 
+void sendSignalToCam(void);
+void configHCSR(void);
+void antiThiefMode(void);
+
+void handleDataAck(String dataAck);
 String dataToSend();
-String sendData(String dataToSend);
-bool handleDataAck(String dataAck);
-// void handleDataReceiver();
-String getDataGateway();
+// Firebase
+
+void sendMessage_1(void);
+void sendMessage_2(void);
+void sendMessage_3(void);
+
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-uint32_t time1;
 uint32_t timeUpdateData = TIME_UPDATE_DATA_DEFAULT;
 uint32_t timeDelayBuzzer;
-String dataNotUpdate();
+uint32_t timeReconnectWiFi;
+uint32_t timeDelaySendDataCam;
+
 String dataReceiver = "";
 bool isDataReceiverGateway = false;
-WebSocketsClient webSocket;
-void webSocketEvent(WStype_t type, uint8_t *payload, size_t length);
 
 uint32_t timeDelayOpen;
+
 void setup()
 {
 	Serial.begin(9600);
-	pinMode(25, OUTPUT);
-	pinMode(BUZZER_PIN, OUTPUT);
-	digitalWrite(25, LOW);
-	digitalWrite(BUZZER_PIN, HIGH);
+
+	initWiFi();
+	// initFirebase();
 	lcd.init(); // initialize the lcd
 	lcd.backlight();
+	pinMode(PIR_PIN, INPUT);
+	pinMode(ECHO_HCSR04_PIN, INPUT);
+	pinMode(TRIG_HCSR04_PIN, OUTPUT);
+	pinMode(VIBRATION_PIN, INPUT);
+	pinMode(BUZZER_PIN, OUTPUT);
+
+	myservo.attach(12);
+	myservo.write(0);
+	pinMode(TRANSMIT_PIN, OUTPUT);
+	digitalWrite(BUZZER_PIN, HIGH);
 	fingerInit();
 	loopCount = 0;
 	curTime = millis();
 	// deviceStatus.statusChangeFinger = false;
-	servo1.attach(servoPin);
-	servo1.write(0);
 	initKeyPad();
-	WiFi.begin("Gateway", "password");
-	// lcd.print("Wait.");
-	uint32_t timeOutConnectGateway = millis();
-	while (WiFi.status() != WL_CONNECTED && (millis() - timeOutConnectGateway < 30000))
-	{
-		Serial.print(".");
-		delay(500);
-	}
-	// delay(1000);
 	lcdDisplayEnterPass();
 
 	webSocket.begin(hostName, 81);
 	webSocket.onEvent(webSocketEvent);
-	// handleDataAck(sendData(getDataGateway()));
+	//  twilio = new Twilio(account_sid, auth_token);
 }
 
 void loop()
 {
+	if (nodeLock.isAntiThief == true)
+	{
+		configHCSR();
+		antiThiefMode();
+	}
 
 	if (deviceStatus.keyPress == true)
 	{
@@ -168,8 +262,7 @@ void loop()
 		nodeLock.isWarning = true;
 		if (deviceStatus.warning == false)
 		{
-			String data = dataToSend();
-			webSocket.sendTXT(data);
+			// String data = dataToSend();
 		}
 		deviceStatus.warning = true;
 		if (millis() - timeDelayBuzzer > 500)
@@ -179,10 +272,10 @@ void loop()
 		}
 		// Serial.println("SOS");
 	}
-	if (nodeLock.isLocked == false && deviceStatus.openDoor == false)
+	if (nodeLock.isOpen == false && deviceStatus.openDoor == false)
 	{
-		// handleDataAck(sendData(dataToSend()));
 		openDoor();
+		timeDelayOpen = millis();
 		// lcdDisplayEnterPass();
 	}
 	if (deviceStatus.openDoor == true && millis() - timeDelayOpen > 10000)
@@ -201,28 +294,48 @@ void loop()
 		// lcdDisplayEnterPass();
 		curTime = millis();
 		deviceStatus.statusChangeFinger = false;
-		// lcdDisplayEnterPass();
+		initKeyPad();
+		lcdDisplayEnterPass();
 	}
 
-	webSocket.loop();
 	if (isDataReceiverGateway == true)
 	{
-		handleDataAck(dataReceiver.c_str());
+		handleDataAck(dataReceiver);
 		isDataReceiverGateway = false;
 		dataReceiver = "";
 	}
-	if (WiFi.status() != WL_CONNECTED)
+	if (nodeLock.isWarning == true)
 	{
-		WiFi.disconnect();
-		WiFi.reconnect();
-		uint32_t timeOutConnectGateway = millis();
-		while (WiFi.status() != WL_CONNECTED && (millis() - timeOutConnectGateway < 30000))
+		Serial.println("Buzzer");
+		if (millis() - timeDelayBuzzer > 500)
 		{
-			Serial.print(".");
-			delay(500);
+			statusBuzzer = !statusBuzzer;
+			digitalWrite(BUZZER_PIN, statusBuzzer);
+			timeDelayBuzzer = millis();
 		}
 	}
+	else
+	{
+		digitalWrite(BUZZER_PIN, HIGH);
+	}
+
+	webSocket.loop();
 }
+
+void initWiFi()
+{
+	WiFi.begin("Gateway", "password");
+	while (WiFi.status() != WL_CONNECTED)
+	{
+		delay(1000);
+		Serial.println("Connecting to WiFi...");
+	}
+	if (WiFi.status() == WL_CONNECTED)
+	{
+		Serial.println("Connected to WiFi - OK");
+	}
+}
+
 void lcdDisplayEnterPass()
 {
 	lcd.clear();
@@ -265,10 +378,10 @@ void handleKeyPress()
 				pass = INPUT_KEYPAD_DEFAULT;
 				break;
 			}
-			if(deviceStatus.openDoor == true)
+			if (deviceStatus.openDoor == true)
 			{
 				break;
-				//openDoor();
+				// openDoor();
 			}
 		}
 		curTime = millis();
@@ -299,20 +412,61 @@ bool handleKeyPad(char c)
 				if (pass == nodeLock.password)
 				{
 					lcd.clear();
-					lcd.setCursor(5, 0);
-					lcd.print("CORRECT!");
-					Serial.println("CORRECT");
 					if (deviceStatus.mode == NORMAL)
 					{
+						lcd.setCursor(5, 0);
+						lcd.print("CORRECT!");
+						Serial.println("CORRECT");
+						delay(1);
+						// doServoOpen();
+						// delay(2000);
+						// doServoClose();
+						// delay(100);
+						// delay(2000);
 						// deviceStatus.openDoor = true;
-						//deviceStatus.openDoor = true;
-						nodeLock.isLocked = false;
+						// deviceStatus.openDoor = true;
+						nodeLock.isOpen = false;
 					}
 					else if (deviceStatus.mode == CHANGE_FINGER)
 					{
+						lcd.setCursor(0, 0);
+						lcd.print("Change Finger");
+						Serial.println("CORRECT");
 						deviceStatus.statusChangeFinger = true;
 					}
+					else if (deviceStatus.mode == CHANGE_PASSWORD)
+					{
+						lcd.setCursor(0, 0);
+						lcd.print("Enter pass new");
+						statusChangePass = true;
+						pass = INPUT_KEYPAD_DEFAULT;
+						inputKeypad = INPUT_KEYPAD_DEFAULT;
+						// checkPass = true;
+						curCursorIndex = 0;
+						countWrongPass = 0;
+						return true;
+					}
 					// delay(2000);
+					deviceStatus.mode = NORMAL;
+					pass = INPUT_KEYPAD_DEFAULT;
+					inputKeypad = INPUT_KEYPAD_DEFAULT;
+					// checkPass = true;
+					curCursorIndex = 0;
+					countWrongPass = 0;
+					return true;
+				}
+				else if (deviceStatus.mode == CHANGE_PASSWORD && statusChangePass == true)
+				{
+					lcd.clear();
+					lcd.setCursor(0, 0);
+					lcd.print("Change Pass");
+					lcd.setCursor(0, 1);
+					lcd.print("Success");
+					nodeLock.password = pass;
+					// String data = dataToSend();
+					delay(500);
+					statusChangePass = false;
+					deviceStatus.mode = NORMAL;
 					pass = INPUT_KEYPAD_DEFAULT;
 					inputKeypad = INPUT_KEYPAD_DEFAULT;
 					// checkPass = true;
@@ -326,6 +480,10 @@ bool handleKeyPad(char c)
 					lcd.setCursor(5, 0);
 					lcd.print("WRONG!!!");
 					Serial.println("WRONG!!!");
+					delay(1);
+					// sendMessage_2();
+					delay(2000);
+					deviceStatus.mode = NORMAL;
 					pass = INPUT_KEYPAD_DEFAULT;
 					inputKeypad = INPUT_KEYPAD_DEFAULT;
 					delay(2000);
@@ -358,7 +516,11 @@ bool handleKeyPad(char c)
 			return false;
 			break;
 		case 'B':
-			statusChangePass = true;
+			//
+			// statusChangePass = true;
+			deviceStatus.mode = CHANGE_PASSWORD;
+			lcd.setCursor(0, 0);
+			lcd.print(" Enter Pass Old    ");
 			break;
 		case 'C':
 			break;
@@ -389,21 +551,27 @@ bool handleKeyPad(char c)
 
 void openDoor()
 {
-	nodeLock.isLocked = false;
-	String data = dataToSend();
-	webSocket.sendTXT(data);
+	nodeLock.isOpen = false;
+	// String data = dataToSend();
 	deviceStatus.openDoor = true;
 	// sendData(dataToSend());
 	Serial.println("Open");
+	String data = dataToSend();
+	webSocket.sendTXT(data);
 	lcdDisplayOpenDoor();
-	for (int i = 0; i < 30; i++)
-	{
-		deg += 3;
-		if (deg >= 90)
-			deg = 90;
-		servo1.write(deg);
-		delay(20);
-	}
+
+	doServoOpen();
+	// delay(2000);
+	// doServoClose();
+
+	// for (int i = 0; i < 30; i++)
+	// {
+	// 	deg += 3;
+	// 	if (deg >= 90)
+	// 		deg = 90;
+	// 	servo1.write(deg);
+	// 	delay(20);
+	// }
 	// delay(2000);
 	timeDelayOpen = millis();
 	// delay(5000);
@@ -412,21 +580,23 @@ void openDoor()
 
 void closeDoor()
 {
-	nodeLock.isLocked = true;
+	nodeLock.isOpen = true;
 	String data = dataToSend();
 	webSocket.sendTXT(data);
+	// String data = dataToSend();
+	doServoClose();
 	Serial.println("Close");
 	lcd.clear();
 	lcd.print("  Close!!");
-	for (int i = 0; i < 30; i++)
-	{
-		deg -= 3;
-		if (deg <= 0)
-			deg = 0;
-		servo1.write(deg);
-		delay(20);
-	}
-	servo1.write(0);
+	// for (int i = 0; i < 30; i++)
+	// {
+	// 	deg -= 3;
+	// 	if (deg <= 0)
+	// 		deg = 0;
+	// 	servo1.write(deg);
+	// 	delay(20);
+	// }
+	// servo1.write(0);
 	deviceStatus.openDoor = false;
 	lcdDisplayEnterPass();
 }
@@ -448,8 +618,8 @@ int checkFinger()
 	if (fingerStatus != -1 and fingerStatus != -2)
 	{
 		Serial.print("Match");
-		Serial.println(fingerIdOpenDoor);
-		fingerIdOpenDoor = fingerStatus;
+		Serial.println(fingerID_OpenDoor);
+		fingerID_OpenDoor = fingerStatus;
 		return 1;
 	}
 	else
@@ -506,129 +676,235 @@ char getKeyInterrupt()
 
 bool handleFinger()
 {
-	if (fingerIdOpenDoor != 0)
+	if (fingerID_OpenDoor != 0)
 	{
 		// deviceStatus.openDoor = true;
-		nodeLock.isLocked = false;
+		nodeLock.isOpen = false;
 		// openDoor();
-		fingerIdOpenDoor = 0;
+		fingerID_OpenDoor = 0;
 		return true;
 	}
 	return false;
 }
 
-String dataToSend()
+void configHCSR(void)
 {
-	DynamicJsonDocument dataToSend(1024);
-	dataToSend[F("nodeIndex")] = nodeLock.nodeIndex;
-	dataToSend[F("isLocked")] = nodeLock.isLocked;
-	dataToSend[F("isWarning")] = nodeLock.isWarning;
-	dataToSend[F("password")] = nodeLock.password;
-	// dataToSend[F("status")] = nodeLock.status;
-	String output;
-	serializeJson(dataToSend, output);
-	return output;
+	digitalWrite(TRIG_HCSR04_PIN, 0);
+	delayMicroseconds(2);
+	digitalWrite(TRIG_HCSR04_PIN, 1);
+	delayMicroseconds(10);
+	digitalWrite(TRIG_HCSR04_PIN, 0);
+
+	duration = pulseIn(ECHO_HCSR04_PIN, HIGH);
+	distance_human = int(duration / 2 / 29.412);
+	value_PIR = digitalRead(PIR_PIN);
+	value_VIBRATION = digitalRead(VIBRATION_PIN);
+	if (checkConfig)
+	{
+		Serial.println("Config done!\n");
+		checkConfig = false;
+	}
 }
 
-String sendData(String dataToSend)
+void sendSignalToCam(void)
 {
-	if (WiFi.status() == WL_CONNECTED)
+	Serial.println("Da gui tin hieu cho Camera\n");
+	digitalWrite(TRANSMIT_PIN, HIGH);
+}
+
+void antiThiefMode(void)
+{
+	digitalWrite(BUZZER_PIN, HIGH);
+	switch (value_PIR)
 	{
-		WiFiClient client;
-		HTTPClient http;
-		http.begin(client, hostName);
-		http.addHeader("Content-Type", "application/json");
-		int httpResponseCode = http.POST(dataToSend);
-		if (httpResponseCode == 200)
+	case NO_MOTION:
+		if (distance_human > 5)
 		{
-			// Serial.println(http.getString());
-			String dataAck = http.getString();
-			Serial.println(dataAck);
-			// serialPrintstring(dataAck.c_str());
-			return dataAck;
+			Serial.printf("[No motion] [No touch] [Long] - Distance: %d (cm)\n", distance_human);
+			delay(800);
 		}
 		else
 		{
-			return "!";
+			Serial.printf("[No motion] [No touch] [Short] - Distance: %d (cm)\n", distance_human);
+			// delay(800);
+			// if (millis() - timeDelaySendDataCam > 40000)
+			// {
+			// 	sendSignalToCam();
+			// 	delay(2000);
+			// 	digitalWrite(TRANSMIT_PIN, LOW);
+			// 	timeDelaySendDataCam = millis();
+			// }
 		}
-		Serial.print("HTTP Response code: ");
-		Serial.println(httpResponseCode);
-		http.end();
+		break;
+
+	case DETECT_MOTION:
+		switch (value_VIBRATION)
+		{
+		case NO_TOUCH:
+			if (distance_human > 50)
+			{
+				Serial.printf("[Motion] [No touch] [Long] - Distance: %d (cm)\n", distance_human);
+				delay(500);
+			}
+			else if (distance_human < 50 && distance_human > 0)
+			{
+				Serial.printf("[Motion] [No touch] [Short] - Distance: %d (cm)\n", distance_human);
+				nodeLock.isWarning = true;
+				nodeLock.hasCameraRequest = true;
+				if (nodeLock.hasCameraRequest == true && millis() - timeDelaySendDataCam > 120000)
+				{
+					sendSignalToCam();
+					delay(2000);
+					digitalWrite(TRANSMIT_PIN, LOW);
+					timeDelaySendDataCam = millis();
+				}
+				String data = dataToSend();
+				webSocket.sendTXT(data);
+		
+				delay(2000);
+				nodeLock.hasCameraRequest = false;
+				// digitalWrite(TRANSMIT_PIN, HIGH);
+				// digitalWrite(TRANSMIT_PIN, LOW);
+
+				data = dataToSend();
+				webSocket.sendTXT(data);
+		
+
+				do_NOTOUCH_SHORT = true;
+				if (do_NOTOUCH_SHORT)
+				{
+					send_MSG_NOTOUCH_SHORT++;
+					delay(300);
+					if (send_MSG_NOTOUCH_SHORT >= 20)
+					{
+						// sendMessage_1();
+						delay(10);
+						send_MSG_NOTOUCH_SHORT = 0;
+
+						// còi kêu 5 phút
+						// for (int i = 0; i < 20; i++)
+						// {
+						// 	statusBuzzer = ! statusBuzzer;
+						// 	digitalWrite(BUZZER_PIN, statusBuzzer);
+						// 	delay(500);
+						// }
+						digitalWrite(BUZZER_PIN, HIGH);
+
+						do_NOTOUCH_SHORT = false;
+					}
+				}
+			}
+			break;
+		case DETECT_TOUCH:
+			if (distance_human > 50)
+			{
+
+				nodeLock.isWarning = true;
+				nodeLock.hasCameraRequest = true;
+				String data = dataToSend();
+				webSocket.sendTXT(data);
+		
+				delay(2000);
+				nodeLock.hasCameraRequest = false;
+				data = dataToSend();
+				webSocket.sendTXT(data);
+		
+
+				Serial.printf("[Motion] [Touch] [Long] - Distance: %d (cm)\n", distance_human);
+				do_TOUCHED_LONG = true;
+				if (do_TOUCHED_LONG)
+				{
+					send_MSG_TOUCHED_LONG++;
+					delay(300);
+					if (send_MSG_TOUCHED_LONG >= 5)
+					{
+						// sendMessage_2();
+						delay(1);
+						send_MSG_TOUCHED_LONG = 0;
+
+						// còi kêu 5s
+						for (int i = 0; i < 5; i++)
+						{
+							digitalWrite(BUZZER_PIN, LOW);
+							delay(500);
+						}
+						digitalWrite(BUZZER_PIN, HIGH);
+
+						do_TOUCHED_LONG = false;
+					}
+				}
+			}
+			else if (distance_human < 50 && distance_human > 0)
+			{
+				Serial.printf("[Motion] [Touch] [Short] - Distance: %d (cm)\n", distance_human);
+				delay(300);
+				// sendMessage_2();
+				// còi kêu 5p
+				nodeLock.isWarning = true;
+				nodeLock.hasCameraRequest = true;
+				digitalWrite(TRANSMIT_PIN, HIGH);
+				String data = dataToSend();
+				webSocket.sendTXT(data);
+
+		
+				delay(2000);
+				nodeLock.hasCameraRequest = false;
+				digitalWrite(TRANSMIT_PIN, LOW);
+				data = dataToSend();
+				webSocket.sendTXT(data);
+
+				// for (int i = 0; i < 20; i++)
+				// {
+				// 	digitalWrite(BUZZER_PIN, LOW);
+				// 	delay(500);
+				// }
+				digitalWrite(BUZZER_PIN, HIGH);
+			}
+			break;
+		}
+		break;
+	default:
+		Serial.print("No sensor is installed !");
+		break;
 	}
-	else
-	{
-		Serial.println("WiFi Disconnected");
-		ESP.restart();
-		// WiFi.reconnect();
-		//  reconnectNetwork = true;
-	}
-	// return 0;
-	return "";
 }
 
-bool handleDataAck(String dataAck)
-{
-	DynamicJsonDocument dataAckJson(1024);
-	deserializeJson(dataAckJson, dataAck);
-	if (dataAck == "" || dataAck.length() < 20)
-	{
-		return false;
-	}
-	if (dataAck.indexOf("isWarning") != -1)
-	{
-		nodeLock.isWarning = dataAckJson[F("isWarning")].as<bool>();
-		deviceStatus.warning = nodeLock.isWarning;
-		if (nodeLock.isWarning == false)
-		{
-			countWrongFinger = 0;
-			countWrongPass = 0;
-			digitalWrite(BUZZER_PIN, HIGH);
-		}
-	}
-	if (dataAck.indexOf("password") != -1)
-	{
-		nodeLock.password = dataAckJson[F("password")].as<string>();
-		// if (nodeLock.password == p)
-		// {
-		// 	timeUpdateData = TIME_UPDATE_DATA_DEFAULT;
-		// }
-	}
-	if (dataAck.indexOf("isLocked") != -1)
-	{
-		nodeLock.isLocked = dataAckJson[F("isLocked")].as<bool>();
-		if (nodeLock.isLocked == false)
-		{
-			openDoor();
-		}
-		else
-		{
-			closeDoor();
-		}
-	}
-	return true;
-}
-
-String dataNotUpdate()
-{
-	DynamicJsonDocument dataToSend(1024);
-	dataToSend[F("nodeIndex")] = nodeLock.nodeIndex;
-	dataToSend[F("statusUpdater")] = "Not update";
-	// dataToSend[F("status")] = nodeLock.status;
-	String output;
-	serializeJson(dataToSend, output);
-	return output;
-}
-
-String getDataGateway()
-{
-	DynamicJsonDocument doc(1024);
-	String getData;
-	doc["name"] = "nodeLock";
-	doc["isFirstConnected"] = true;
-	// doc["name"]
-	serializeJson(doc, getData);
-	return getData;
-}
+// void //sendMessage_1 (void)
+// {
+//   String response;
+//   bool success = twilio->send_message(to_number, from_number, message_warning_1, response);
+//   if (success) {
+//     Serial.println("Sent MESSAGE 1 ok!");
+//   }
+//   else
+//   {
+//     Serial.println(response);
+//   }
+// }
+// void //sendMessage_2 (void)
+// {
+//   String response;
+//   bool success = twilio->send_message(to_number, from_number, message_warning_2, response);
+//   if (success) {
+//     Serial.println("Sent MESSAGE 2 ok!");
+//   }
+//   else
+//   {
+//     Serial.println(response);
+//   }
+// }
+// void //sendMessage_3 (void)
+// {
+//   String response;
+//   bool success = twilio->send_message(to_number, from_number, message_warning_3, response);
+//   if (success) {
+//     Serial.println("Sent MESSAGE 3 ok!");
+//   }
+//   else
+//   {
+//     Serial.println(response);
+//   }
+// }
 
 void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
 {
@@ -640,9 +916,6 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
 	case WStype_CONNECTED:
 	{
 		Serial.println("Connected");
-		// webSocket.sendTXT("name:\"nodeControl\"");
-		String dataToSend = getDataGateway();
-		webSocket.sendTXT(dataToSend);
 	}
 	break;
 	case WStype_TEXT:
@@ -650,7 +923,58 @@ void webSocketEvent(WStype_t type, uint8_t *payload, size_t length)
 		Serial.println("Message: " + String((char *)payload));
 		dataReceiver = String((char *)payload);
 		isDataReceiverGateway = true;
-		// webSocket.sendTXT("Hello gateway");
 		break;
 	}
+}
+
+void handleDataAck(String dataAck)
+{
+	DynamicJsonDocument dataReceiverJson(1024);
+	deserializeJson(dataReceiverJson, dataAck);
+
+	if (dataAck.indexOf("hasCameraRequest") != -1)
+	{
+		nodeLock.hasCameraRequest = dataReceiverJson[F("hasCameraRequest")].as<bool>();
+
+		if (nodeLock.hasCameraRequest == true && millis() - timeDelaySendDataCam > 120000)
+		{
+			sendSignalToCam();
+			delay(2000);
+			digitalWrite(TRANSMIT_PIN, LOW);
+			timeDelaySendDataCam = millis();
+		}
+	}
+	else if (dataAck.indexOf("isAntiThief") != -1)
+	{
+		nodeLock.isAntiThief = dataReceiverJson[F("isAntiThief")].as<bool>();
+	}
+	else if (dataAck.indexOf("isOpen") != -1)
+	{
+		nodeLock.isOpen = dataReceiverJson[F("isOpen")].as<bool>();
+	}
+	else if (dataAck.indexOf("password") != -1)
+	{
+		Serial.println(dataReceiverJson["password"].as<String>());
+		nodeLock.password = dataReceiverJson[F("password")].as<string>();
+		Serial.println("ChangePassWord");
+	}
+	else if (dataAck.indexOf("isWarning") != -1)
+	{
+		nodeLock.isWarning = dataReceiverJson[F("isWarning")].as<bool>();
+	}
+}
+
+String dataToSend()
+{
+	DynamicJsonDocument dataToSend(1024);
+
+	dataToSend[F("isOpen")] = nodeLock.isOpen;
+	dataToSend[F("isWarning")] = nodeLock.isWarning;
+	dataToSend[F("password")] = nodeLock.password;
+	dataToSend[F("isAntiThief")] = nodeLock.isAntiThief;
+	dataToSend[F("hasCameraRequest")] = nodeLock.hasCameraRequest;
+	// dataToSend[F("status")] = nodeLock.status;
+	String output;
+	serializeJson(dataToSend, output);
+	return output;
 }
