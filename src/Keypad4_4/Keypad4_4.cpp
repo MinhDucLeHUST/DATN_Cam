@@ -1,10 +1,10 @@
 #include "Keypad4_4.h"
 
 char keys[ROW_NUM][COLUMN_NUM] = {
-    {'D', '#', '0', '*'},
-    {'C', '9', '8', '7'},
-    {'B', '6', '5', '4'},
-    {'A', '3', '2', '1'}};
+    {'1', '2', '3', 'A'},
+    {'4', '5', '6', 'B'},
+    {'7', '8', '9', 'C'},
+    {'*', '0', '#', 'D'}};
 int pin_rows[ROW_NUM] = {19, 18, 5, 17};     // GIOP19, GIOP18, GIOP5, GIOP17 connect to the row pins
 int pin_column[COLUMN_NUM] = {16, 4, 2, 15}; // GIOP16, GIOP4, GIOP0, GIOP2 connec
 

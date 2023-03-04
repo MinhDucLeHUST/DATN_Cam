@@ -7,7 +7,6 @@ int id = 0;
 
 void fingerInit()
 {
-
 	lcdDisplay.backlight();
 	Serial.println("\n\nAdafruit Fingerprint sensor enrollment");
 	finger.begin(57600);
@@ -259,18 +258,3 @@ int getFingerprintIDez()
 	Serial.println(finger.confidence);
 	return finger.fingerID;
 }
-// else if (p == FINGERPRINT_PACKETRECIEVEERR)
-// {
-// 	Serial.println("Communication error");
-// 	return p;
-// }
-// else if (p == FINGERPRINT_BADLOCATION)
-// {
-// 	Serial.println("Could not store in that location");
-// 	return p;
-// }
-// else if (p == FINGERPRINT_FLASHERR)
-// {
-// 	Serial.println("Error writing to flash");
-// 	return p;
-// }

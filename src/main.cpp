@@ -19,14 +19,14 @@ using namespace std;
 #define INPUT_KEYPAD_DEFAULT "______"
 #define TIME_UPDATE_DATA_DEFAULT 2000
 
-// const char* ssid = "P407";
-// const char* password = "17052000";
+const char* ssid = "P407";
+const char* password = "17052000";
 
 // const char* ssid = "DucCoding";
 // const char* password = "20082k36";
 
-const char *ssid = "Noi binh yen";
-const char *password = "lucy666666";
+// const char *ssid = "Noi binh yen";
+// const char *password = "lucy666666";
 
 DeviceStatus deviceStatus;
 Servo myservo;
@@ -43,20 +43,17 @@ unsigned long curTime;
 
 // Servo
 int pos = 0; // variable to store the servo position
-void doServoOpen(void)
-{
-	for (pos = 0; pos <= 45; pos += 1)
-	{
-		myservo.write(pos); // tell servo to go to position in variable 'pos'
-		delay(15);			// waits 15ms for the servo to reach the position
+
+void doServoOpen(void){
+	for (pos = 0; pos <= 45; pos += 1){
+		myservo.write(pos); 
+		delay(15);
 	}
 }
-void doServoClose(void)
-{
-	for (pos = 45; pos >= 0; pos -= 1)
-	{
-		myservo.write(pos); // tell servo to go to position in variable 'pos'
-		delay(15);			// waits 15ms for the servo to reach the position
+void doServoClose(void){
+	for (pos = 45; pos >= 0; pos -= 1){
+		myservo.write(pos); 
+		delay(15);
 	}
 }
 
@@ -109,7 +106,6 @@ bool transmitSignal = false;
 int countTransmit = 0;
 bool var_sendCam = true;
 
-// anti thief mode
 String hostName = "192.1.1.1";
 const string PASSWORD = "123456";
 string inputKeypad = "______";
@@ -126,6 +122,7 @@ struct NodeLock
 	bool hasCameraRequest = false;
 	string password = "123456";
 	bool isWarning;
+	bool isWarning_modeAntiThief;
 	bool isAntiThief;
 	int status;
 };
@@ -143,7 +140,6 @@ void IRAM_ATTR isr()
 {
 	deviceStatus.keyPress = true;
 }
-bool check123 = true;
 
 void initWiFi();
 
@@ -202,7 +198,6 @@ void setup()
 	pinMode(TRIG_HCSR04_PIN, OUTPUT);
 	pinMode(VIBRATION_PIN, INPUT);
 	pinMode(BUZZER_PIN, OUTPUT);
-
 	myservo.attach(12);
 	myservo.write(0);
 	pinMode(TRANSMIT_PIN, OUTPUT);
@@ -260,22 +255,36 @@ void loop()
 		lcd.clear();
 		lcd.print("  WARNING!!!!");
 		nodeLock.isWarning = true;
-		if (deviceStatus.warning == false)
+		nodeLock.hasCameraRequest = true;
+		if (nodeLock.hasCameraRequest == true && millis() - timeDelaySendDataCam > 120000)
 		{
-			// String data = dataToSend();
-		}
-		deviceStatus.warning = true;
-		if (millis() - timeDelayBuzzer > 500)
-		{
-			statusBuzzer = !statusBuzzer;
-			digitalWrite(BUZZER_PIN, statusBuzzer);
-		}
-		// Serial.println("SOS");
+			sendSignalToCam();
+			delay(2000);
+			digitalWrite(TRANSMIT_PIN, LOW);
+			timeDelaySendDataCam = millis();
+		}			
+		String data = dataToSend();
+		webSocket.sendTXT(data);
+
+		delay(2000);
+		nodeLock.hasCameraRequest = false;
+		data = dataToSend();
+		webSocket.sendTXT(data);
+
+		countWrongFinger = 0;
+		countWrongPass = 0;		
+		Serial.println("SOS\n");
 	}
 	if (nodeLock.isOpen == false && deviceStatus.openDoor == false)
 	{
 		openDoor();
 		timeDelayOpen = millis();
+		// if (nodeLock.isAntiThief == true)
+		// {
+		// 	nodeLock.isAntiThief = false;
+		// 	String data = dataToSend();
+		// 	webSocket.sendTXT(data);
+		// }
 		// lcdDisplayEnterPass();
 	}
 	if (deviceStatus.openDoor == true && millis() - timeDelayOpen > 10000)
@@ -307,11 +316,12 @@ void loop()
 	if (nodeLock.isWarning == true)
 	{
 		Serial.println("Buzzer");
-		if (millis() - timeDelayBuzzer > 500)
+		for (int i = 0; i < 2; i++)
 		{
-			statusBuzzer = !statusBuzzer;
-			digitalWrite(BUZZER_PIN, statusBuzzer);
-			timeDelayBuzzer = millis();
+			digitalWrite(BUZZER_PIN, LOW);
+			delay(200);
+			digitalWrite(BUZZER_PIN, HIGH);
+			delay(200);
 		}
 	}
 	else
@@ -418,13 +428,6 @@ bool handleKeyPad(char c)
 						lcd.print("CORRECT!");
 						Serial.println("CORRECT");
 						delay(1);
-						// doServoOpen();
-						// delay(2000);
-						// doServoClose();
-						// delay(100);
-						// delay(2000);
-						// deviceStatus.openDoor = true;
-						// deviceStatus.openDoor = true;
 						nodeLock.isOpen = false;
 					}
 					else if (deviceStatus.mode == CHANGE_FINGER)
@@ -437,7 +440,7 @@ bool handleKeyPad(char c)
 					else if (deviceStatus.mode == CHANGE_PASSWORD)
 					{
 						lcd.setCursor(0, 0);
-						lcd.print("Enter pass new");
+						lcd.print("Enter new pass");
 						statusChangePass = true;
 						pass = INPUT_KEYPAD_DEFAULT;
 						inputKeypad = INPUT_KEYPAD_DEFAULT;
@@ -520,7 +523,7 @@ bool handleKeyPad(char c)
 			// statusChangePass = true;
 			deviceStatus.mode = CHANGE_PASSWORD;
 			lcd.setCursor(0, 0);
-			lcd.print(" Enter Pass Old    ");
+			lcd.print(" Enter Old Pass    ");
 			break;
 		case 'C':
 			break;
@@ -556,26 +559,16 @@ void openDoor()
 	deviceStatus.openDoor = true;
 	// sendData(dataToSend());
 	Serial.println("Open");
+	if (nodeLock.isAntiThief == true)
+	{
+		nodeLock.isAntiThief = false;
+	}
 	String data = dataToSend();
 	webSocket.sendTXT(data);
 	lcdDisplayOpenDoor();
 
 	doServoOpen();
-	// delay(2000);
-	// doServoClose();
-
-	// for (int i = 0; i < 30; i++)
-	// {
-	// 	deg += 3;
-	// 	if (deg >= 90)
-	// 		deg = 90;
-	// 	servo1.write(deg);
-	// 	delay(20);
-	// }
-	// delay(2000);
 	timeDelayOpen = millis();
-	// delay(5000);
-	// closeDoor();
 }
 
 void closeDoor()
@@ -611,6 +604,8 @@ void warnWrongPassword()
 	lcd.print("Try after 30s!");
 }
 
+int count_fingerWrong = 0;
+
 int checkFinger()
 {
 	int fingerStatus = -1;
@@ -626,9 +621,11 @@ int checkFinger()
 	{
 		if (fingerStatus == -2)
 		{
-			for (int ii = 0; ii < 5; ii++)
+			count_fingerWrong ++;
+			Serial.printf("Not Match, time: %d\n", count_fingerWrong);
+			if(count_fingerWrong >=5)
 			{
-				Serial.print("Not Match");
+				count_fingerWrong = 0;
 			}
 			return 0;
 		}
@@ -658,6 +655,7 @@ void deInitKeyPad()
 		detachInterrupt(pin_rows1[i]);
 	}
 }
+
 char getKeyInterrupt()
 {
 	unsigned int timeOut = 5000;
@@ -718,7 +716,7 @@ void antiThiefMode(void)
 	switch (value_PIR)
 	{
 	case NO_MOTION:
-		if (distance_human > 5)
+		if (distance_human > 50)
 		{
 			Serial.printf("[No motion] [No touch] [Long] - Distance: %d (cm)\n", distance_human);
 			delay(800);
@@ -726,14 +724,7 @@ void antiThiefMode(void)
 		else
 		{
 			Serial.printf("[No motion] [No touch] [Short] - Distance: %d (cm)\n", distance_human);
-			// delay(800);
-			// if (millis() - timeDelaySendDataCam > 40000)
-			// {
-			// 	sendSignalToCam();
-			// 	delay(2000);
-			// 	digitalWrite(TRANSMIT_PIN, LOW);
-			// 	timeDelaySendDataCam = millis();
-			// }
+			delay(800);
 		}
 		break;
 
@@ -749,48 +740,31 @@ void antiThiefMode(void)
 			else if (distance_human < 50 && distance_human > 0)
 			{
 				Serial.printf("[Motion] [No touch] [Short] - Distance: %d (cm)\n", distance_human);
-				nodeLock.isWarning = true;
-				nodeLock.hasCameraRequest = true;
-				if (nodeLock.hasCameraRequest == true && millis() - timeDelaySendDataCam > 120000)
-				{
-					sendSignalToCam();
-					delay(2000);
-					digitalWrite(TRANSMIT_PIN, LOW);
-					timeDelaySendDataCam = millis();
-				}
-				String data = dataToSend();
-				webSocket.sendTXT(data);
-		
-				delay(2000);
-				nodeLock.hasCameraRequest = false;
-				// digitalWrite(TRANSMIT_PIN, HIGH);
-				// digitalWrite(TRANSMIT_PIN, LOW);
-
-				data = dataToSend();
-				webSocket.sendTXT(data);
-		
-
 				do_NOTOUCH_SHORT = true;
 				if (do_NOTOUCH_SHORT)
 				{
 					send_MSG_NOTOUCH_SHORT++;
-					delay(300);
+					delay(200);
 					if (send_MSG_NOTOUCH_SHORT >= 20)
 					{
-						// sendMessage_1();
-						delay(10);
 						send_MSG_NOTOUCH_SHORT = 0;
+						nodeLock.isWarning = true;
+						nodeLock.hasCameraRequest = true;
+						if (nodeLock.hasCameraRequest == true && millis() - timeDelaySendDataCam > 120000)
+						{
+							sendSignalToCam();
+							delay(2000);
+							digitalWrite(TRANSMIT_PIN, LOW);
+							timeDelaySendDataCam = millis();
+						}
 
-						// còi kêu 5 phút
-						// for (int i = 0; i < 20; i++)
-						// {
-						// 	statusBuzzer = ! statusBuzzer;
-						// 	digitalWrite(BUZZER_PIN, statusBuzzer);
-						// 	delay(500);
-						// }
-						digitalWrite(BUZZER_PIN, HIGH);
-
-						do_NOTOUCH_SHORT = false;
+						String data = dataToSend();
+						webSocket.sendTXT(data);
+				
+						delay(2000);
+						nodeLock.hasCameraRequest = false;
+						data = dataToSend();
+						webSocket.sendTXT(data);
 					}
 				}
 			}
@@ -798,37 +772,32 @@ void antiThiefMode(void)
 		case DETECT_TOUCH:
 			if (distance_human > 50)
 			{
-
-				nodeLock.isWarning = true;
-				nodeLock.hasCameraRequest = true;
-				String data = dataToSend();
-				webSocket.sendTXT(data);
-		
-				delay(2000);
-				nodeLock.hasCameraRequest = false;
-				data = dataToSend();
-				webSocket.sendTXT(data);
-		
-
 				Serial.printf("[Motion] [Touch] [Long] - Distance: %d (cm)\n", distance_human);
 				do_TOUCHED_LONG = true;
 				if (do_TOUCHED_LONG)
 				{
 					send_MSG_TOUCHED_LONG++;
-					delay(300);
+					delay(10);
 					if (send_MSG_TOUCHED_LONG >= 5)
 					{
 						// sendMessage_2();
-						delay(1);
 						send_MSG_TOUCHED_LONG = 0;
-
-						// còi kêu 5s
-						for (int i = 0; i < 5; i++)
+						nodeLock.isWarning = true;
+						nodeLock.hasCameraRequest = true;
+						if (nodeLock.hasCameraRequest == true && millis() - timeDelaySendDataCam > 120000)
 						{
-							digitalWrite(BUZZER_PIN, LOW);
-							delay(500);
+							sendSignalToCam();
+							delay(2000);
+							digitalWrite(TRANSMIT_PIN, LOW);
+							timeDelaySendDataCam = millis();
 						}
-						digitalWrite(BUZZER_PIN, HIGH);
+						String data = dataToSend();
+						webSocket.sendTXT(data);
+				
+						delay(2000);
+						nodeLock.hasCameraRequest = false;
+						data = dataToSend();
+						webSocket.sendTXT(data);
 
 						do_TOUCHED_LONG = false;
 					}
@@ -837,28 +806,38 @@ void antiThiefMode(void)
 			else if (distance_human < 50 && distance_human > 0)
 			{
 				Serial.printf("[Motion] [Touch] [Short] - Distance: %d (cm)\n", distance_human);
-				delay(300);
-				// sendMessage_2();
-				// còi kêu 5p
-				nodeLock.isWarning = true;
-				nodeLock.hasCameraRequest = true;
-				digitalWrite(TRANSMIT_PIN, HIGH);
-				String data = dataToSend();
-				webSocket.sendTXT(data);
+				do_TOUCHED_SHORT = true;
 
-		
-				delay(2000);
-				nodeLock.hasCameraRequest = false;
-				digitalWrite(TRANSMIT_PIN, LOW);
-				data = dataToSend();
-				webSocket.sendTXT(data);
+				if (do_TOUCHED_SHORT)
+				{
+					send_MSG_TOUCHED_SHORT++;
+					delay(10);
+					if(send_MSG_TOUCHED_SHORT >= 3)
+					{
+						delay(1);
+						send_MSG_TOUCHED_LONG = 0;
+						
+						nodeLock.isWarning = true;
+						nodeLock.hasCameraRequest = true;
+						if (nodeLock.hasCameraRequest == true && millis() - timeDelaySendDataCam > 120000)
+						{
+							sendSignalToCam();
+							delay(2000);
+							digitalWrite(TRANSMIT_PIN, LOW);
+							timeDelaySendDataCam = millis();
+						}
+						String data = dataToSend();
+						webSocket.sendTXT(data);
+				
+						delay(2000);
+						nodeLock.hasCameraRequest = false;
+						data = dataToSend();
+						webSocket.sendTXT(data);
 
-				// for (int i = 0; i < 20; i++)
-				// {
-				// 	digitalWrite(BUZZER_PIN, LOW);
-				// 	delay(500);
-				// }
-				digitalWrite(BUZZER_PIN, HIGH);
+						do_TOUCHED_SHORT = false;
+					}
+					
+				}
 			}
 			break;
 		}
